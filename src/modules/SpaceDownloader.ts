@@ -1,19 +1,45 @@
 import axios from 'axios'
 import { spawn, SpawnOptions } from 'child_process'
-import { writeFileSync } from 'fs'
+import { writeFileSync, createReadStream } from 'fs'
+import { parse } from 'subtitle'
 import path from 'path'
 import winston from 'winston'
 import { PeriscopeApi } from '../apis/PeriscopeApi'
 import { logger as baseLogger } from '../logger'
 import { PeriscopeUtil } from '../utils/PeriscopeUtil'
 import { Util } from '../utils/Util'
+import { DetectedPhrase } from '../interfaces/Twitter.interface'
+
+const phrases = [
+  'NJF',
+  'N J F',
+  'Fuentes',
+  'Nick Fuentes',
+  'Nicholas Fuentes',
+  'Nicholas J Fuentes',
+  'AFPAC',
+  'AFPAK',
+  'F Pack',
+  'America First',
+  'Groyp',
+  'Groyper',
+  'Groiper',
+  'Grouper',
+  'Graper',
+  'Griper',
+  'Cozy TV',
+  'Cozy Dot TV',
+  'CozyTV'
+].map((phrase) => phrase.toLowerCase());
 
 export class SpaceDownloader {
   private logger: winston.Logger
 
+  private directory: string
   private playlistUrl: string
   private playlistFile: string
   private audioFile: string
+  private subsFile: string
 
   constructor(
     private readonly originUrl: string,
@@ -25,8 +51,10 @@ export class SpaceDownloader {
     this.logger.debug('constructor', {
       originUrl, filename, subDir, metadata,
     })
-    this.playlistFile = path.join(Util.getMediaDir(subDir), `${filename}.m3u8`)
-    this.audioFile = path.join(Util.getMediaDir(subDir), `${filename}.m4a`)
+    this.directory = Util.getMediaDir(subDir);
+    this.playlistFile = path.join(this.directory, `${filename}.m3u8`)
+    this.audioFile = path.join(this.directory, `${filename}.mp3`)
+    this.subsFile = path.join(this.directory, `${filename}.mp3.vtt`);
     this.logger.verbose(`Playlist path: "${this.playlistFile}"`)
     this.logger.verbose(`Audio path: "${this.audioFile}"`)
   }
@@ -40,7 +68,9 @@ export class SpaceDownloader {
     // Util.createMediaDir(this.subDir)
     // await this.saveFinalPlaylist()
     Util.createMediaDir(this.subDir)
-    this.spawnFfmpeg()
+    await this.spawnFfmpeg();
+    await this.spawnWhisper();
+    return await this.processCaptions();
   }
 
   private async saveFinalPlaylist() {
@@ -70,9 +100,7 @@ export class SpaceDownloader {
       'file,https,tls,tcp',
       '-i',
       // this.playlistFile,
-      this.playlistUrl,
-      '-c',
-      'copy',
+      this.playlistUrl
     ]
     if (this.metadata) {
       this.logger.debug('Audio metadata', this.metadata)
@@ -93,7 +121,7 @@ export class SpaceDownloader {
       cwd: process.cwd(),
       stdio: 'ignore',
       detached: false,
-      windowsHide: true,
+      windowsHide: true
     }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const cp = process.platform === 'win32'
@@ -101,6 +129,78 @@ export class SpaceDownloader {
       : spawn(cmd, args, spawnOptions)
     // cp.unref()
 
-    return cp
+    const logger = this.logger;
+    return new Promise((resolve, reject) => {
+      cp.on('close', function(code) {
+        logger.debug('FFMPEG exited with code: ' + code);
+        resolve(true);
+      });
+      cp.on('error', function(error) {
+        reject(error);
+      })
+    });
   }
+
+  private spawnWhisper() {
+    const cmd = 'whisper'
+    const args = [
+      this.audioFile,
+      '--model',
+      'small.en'
+    ]
+    this.logger.verbose(`[SpaceDownloader] Transcribing space "${this.audioFile}"`);
+    this.logger.verbose(`${cmd} ${args.join(' ')}`);
+
+    const spawnOptions: SpawnOptions = {
+      cwd: this.directory,
+      stdio: 'pipe',
+      detached: false,
+      windowsHide: true,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const cp = process.platform === 'win32'
+      ? spawn(process.env.comspec, ['/c', cmd, ...args], spawnOptions)
+      : spawn(cmd, args, spawnOptions);
+    
+    const logger = this.logger;
+    return new Promise((resolve, reject) => {
+      cp.stdout.on('data', function(data) {
+        logger.debug(`Whisper data: ${data}`);
+      });
+      cp.on('close', function(code) {
+        logger.debug('Whisper exited with code: ' + code);
+        resolve(true);
+      });
+      cp.on('error', function(error) {
+        reject(error);
+      });
+    });
+  };
+
+  private processCaptions(): Promise<DetectedPhrase[]> {
+    const logger = this.logger;
+    return new Promise((resolve, reject) => {
+
+      const matches = [];
+      createReadStream(this.subsFile)
+        .pipe(parse())
+        .on('data', function(node) {
+          if (node.type === 'cue') {
+            for(let i=0; i<phrases.length; i++) {
+              const regex = new RegExp(phrases[i]);
+              if (regex.test(node.data.text.toLowerCase().replace(/[^a-z0-9 ]/g, ''))) {
+                matches.push(new DetectedPhrase(node.data.start, node.data.text));
+                break;
+              }
+            }
+          }
+        })
+        .on('error', reject)
+        .on('finish', function() {
+          logger.debug('Captions processed, found ' + matches.length + ' matches');
+          resolve(matches);
+        });
+    });
+  };
 }

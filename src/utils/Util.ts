@@ -55,7 +55,7 @@ export class Util {
     * @see https://en.wikipedia.org/wiki/Filename#Reserved_characters_and_words
     */
   public static getCleanFileName(name: string) {
-    return name?.replace?.(/[/\\?*:|<>"]/g, '')
+    return name?.replace?.(/[/\\?*:|<>" ]/g, '')
   }
 
   public static splitArrayIntoChunk<T>(arr: T[], chunkSize: number) {

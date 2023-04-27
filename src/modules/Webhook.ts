@@ -10,13 +10,27 @@ import { SpaceUtil } from '../utils/SpaceUtil'
 import { TwitterUtil } from '../utils/TwitterUtil'
 import { configManager } from './ConfigManager'
 
+const ms_to_hhmmss = function (ms: number): string {
+  const seconds = Math.floor((ms / 1000) % 60);
+  const minutes = Math.floor((ms / 1000 / 60) % 60);
+  const hours = Math.floor((ms / 1000 / 60 / 60) % 24);
+
+  return [
+      hours.toString().padStart(2, "0"),
+      minutes.toString().padStart(2, "0"),
+      seconds.toString().padStart(2, "0")
+  ].join(":");
+};
+
 export class Webhook {
   private logger: winston.Logger
+  private audiospace: AudioSpace
 
   constructor(
     private readonly audioSpace: AudioSpace,
     private readonly masterUrl: string,
   ) {
+    this.audiospace = audioSpace;
     const username = SpaceUtil.getHostUsername(audioSpace)
     const spaceId = SpaceUtil.getId(audioSpace)
     this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` })
@@ -82,10 +96,19 @@ export class Webhook {
           content = [content, config.endMessage].filter((v) => v).map((v) => v.trim()).join(' ')
         }
         content = content.trim()
+
+        const phrases: string[] = [];
+        if ((Array.isArray(this.audiospace.detected_phrases)) && (this.audiospace.detected_phrases.length >= 1)) {
+          this.audiospace.detected_phrases.forEach((phrase) => {
+            const hhmmss = ms_to_hhmmss(phrase.ts);
+            phrases.push(hhmmss + ' ' + phrase.text);
+          });
+        }
+
         // Build request payload
         const payload = {
           content,
-          embeds: [this.getEmbed(usernames)],
+          embeds: [this.getEmbed(usernames, phrases)],
         }
         // Send
         urls.forEach((url) => discordWebhookLimiter.schedule(() => this.post(url, payload)))
@@ -143,7 +166,7 @@ export class Webhook {
     return `${host} is hosting a Space`
   }
 
-  private getEmbed(usernames: string[]) {
+  private getEmbed(usernames: string[], phrases: string[]) {
     const username = SpaceUtil.getHostUsername(this.audioSpace)
     const name = SpaceUtil.getHostName(this.audioSpace)
     const fields: any[] = [
@@ -177,6 +200,14 @@ export class Webhook {
       }
     }
 
+    if (phrases.length >= 1) {
+      fields.push({
+        name: 'Detected Phrases',
+        value: phrases.join('\n')
+      });
+    }
+
+    /*
     if ([AudioSpaceMetadataState.RUNNING, AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
       fields.push(
         {
@@ -185,6 +216,7 @@ export class Webhook {
         },
       )
     }
+    */
 
     const embed = {
       type: 'rich',

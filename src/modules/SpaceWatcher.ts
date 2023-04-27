@@ -11,7 +11,7 @@ import { APP_PLAYLIST_CHUNK_VERIFY_MAX_RETRY, APP_PLAYLIST_REFRESH_INTERVAL, APP
 import { TWITTER_AUTHORIZATION } from '../constants/twitter.constant'
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 import { AccessChat } from '../interfaces/Periscope.interface'
-import { AudioSpace, AudioSpaceMetadata, LiveVideoStreamStatus } from '../interfaces/Twitter.interface'
+import { AudioSpace, AudioSpaceMetadata, LiveVideoStreamStatus, DetectedPhrase } from '../interfaces/Twitter.interface'
 import { logger as baseLogger, spaceLogger } from '../logger'
 import { PeriscopeUtil } from '../utils/PeriscopeUtil'
 import { SpaceUtil } from '../utils/SpaceUtil'
@@ -23,6 +23,7 @@ import { SpaceCaptionsDownloader } from './SpaceCaptionsDownloader'
 import { SpaceCaptionsExtractor } from './SpaceCaptionsExtractor'
 import { SpaceDownloader } from './SpaceDownloader'
 import { Webhook } from './Webhook'
+import { DateTime } from 'luxon';
 
 export class SpaceWatcher extends EventEmitter {
   private logger: winston.Logger
@@ -40,7 +41,7 @@ export class SpaceWatcher extends EventEmitter {
 
   constructor(public spaceId: string) {
     super()
-    this.logger = baseLogger.child({ label: `[SpaceWatcher@${spaceId}]` })
+    this.logger = baseLogger.child({ label: `[SpaceWatcher@${spaceId}]` });
 
     // Force open space url in browser (no need to wait for notification)
     if (program.getOptionValue('forceOpen')) {
@@ -68,11 +69,19 @@ export class SpaceWatcher extends EventEmitter {
     return SpaceUtil.getHostName(this.audioSpace)
   }
 
-  private get filename(): string {
-    const time = Util.getDateTimeString(this.metadata.started_at || this.metadata.created_at)
-    const name = `[${this.userScreenName}][${time}] ${Util.getCleanFileName(this.spaceTitle) || 'NA'} (${this.spaceId})`
-    return name
+  private get detected_phrases(): DetectedPhrase[] {
+    return this.audioSpace.detected_phrases;
   }
+
+  private set detected_phrases(phrases: DetectedPhrase[]) {
+    this.audioSpace.detected_phrases = phrases;
+  }
+
+  private get filename(): string {
+    const date_raw = this.metadata.started_at || this.metadata.created_at;
+    const date = DateTime.fromMillis(this.metadata.started_at || this.metadata.created_at);
+    return Util.getCleanFileName(this.userScreenName) + '-' + date.toFormat('MM-dd-yyyy') + '-' + this.spaceId;
+  };
 
   public async watch(): Promise<void> {
     this.logger.info('Watching...')
@@ -110,7 +119,7 @@ export class SpaceWatcher extends EventEmitter {
       delete audioSpace.sharings
       this.logger.debug('audioSpace', audioSpace)
       const metadata = audioSpace?.metadata
-      this.logger.info('Space metadata', metadata)
+      //this.logger.info('Space metadata', metadata)
       if (!metadata?.creator_results?.result?.rest_id) {
         delete metadata.creator_results
       }
@@ -285,13 +294,16 @@ export class SpaceWatcher extends EventEmitter {
       }
 
       if (this.metadata.state === AudioSpaceMetadataState.ENDED && prevState === AudioSpaceMetadataState.RUNNING) {
-        this.sendWebhooks()
+        //this.sendWebhooks()
       }
     } catch (error) {
       this.logger.warn(`processDownload: ${error.message}`)
     }
-    this.downloadAudio()
-    this.downloadCaptions()
+
+    await this.downloadAudio();
+    if (this.detected_phrases.length >= 1) {
+      this.sendWebhooks();
+    }
   }
 
   private async downloadAudio() {
@@ -303,8 +315,8 @@ export class SpaceWatcher extends EventEmitter {
         artist: this.userDisplayName,
         episode_id: this.spaceId,
       }
-      this.logger.info(`File name: ${this.filename}`)
-      this.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
+      //this.logger.info(`File name: ${this.filename}`)
+      //this.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
       if (!this.downloader) {
         this.downloader = new SpaceDownloader(
           this.dynamicPlaylistUrl,
@@ -313,8 +325,8 @@ export class SpaceWatcher extends EventEmitter {
           metadata,
         )
       }
-      await this.downloader.download()
-      this.emit('complete')
+      this.detected_phrases = await this.downloader.download();
+      this.emit('complete');
     } catch (error) {
       const ms = 10000
       // Attemp to download transcode playlist right after space end could return 404

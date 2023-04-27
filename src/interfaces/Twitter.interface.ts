@@ -1,5 +1,15 @@
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 
+export class DetectedPhrase {
+  constructor(
+    public readonly ts: number,
+    public readonly text: string
+  ) {
+    this.ts = ts;
+    this.text = text;
+  }
+};
+
 /* eslint-disable camelcase */
 export interface User {
   id: number
@@ -99,6 +109,7 @@ export interface AudioSpace {
   metadata: AudioSpaceMetadata
   participants: AudioSpaceParticipants
   sharings?: any
+  detected_phrases: DetectedPhrase[]
 }
 
 export interface LiveVideoStreamStatus {
