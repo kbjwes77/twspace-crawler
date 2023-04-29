@@ -78,7 +78,7 @@ program.action(async (args, cmd: Command) => {
 
   if (url && !id && !spaceUrl) {
     logger.info('Starting in playlist url mode', { url })
-    new SpaceDownloader(url, Util.getDateTimeString()).download()
+    new SpaceDownloader(url, Util.getDateTimeString(), 'playlist', 0).download()
     return
   }
 

@@ -11,7 +11,7 @@ import { APP_PLAYLIST_CHUNK_VERIFY_MAX_RETRY, APP_PLAYLIST_REFRESH_INTERVAL, APP
 import { TWITTER_AUTHORIZATION } from '../constants/twitter.constant'
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 import { AccessChat } from '../interfaces/Periscope.interface'
-import { AudioSpace, AudioSpaceMetadata, LiveVideoStreamStatus, DetectedPhrase } from '../interfaces/Twitter.interface'
+import { AudioSpace, AudioSpaceMetadata, LiveVideoStreamStatus, CaptionPhrase } from '../interfaces/Twitter.interface'
 import { logger as baseLogger, spaceLogger } from '../logger'
 import { PeriscopeUtil } from '../utils/PeriscopeUtil'
 import { SpaceUtil } from '../utils/SpaceUtil'
@@ -69,11 +69,11 @@ export class SpaceWatcher extends EventEmitter {
     return SpaceUtil.getHostName(this.audioSpace)
   }
 
-  private get detected_phrases(): DetectedPhrase[] {
+  private get detected_phrases(): CaptionPhrase[] {
     return this.audioSpace.detected_phrases;
   }
 
-  private set detected_phrases(phrases: DetectedPhrase[]) {
+  private set detected_phrases(phrases: CaptionPhrase[]) {
     this.audioSpace.detected_phrases = phrases;
   }
 
@@ -117,7 +117,6 @@ export class SpaceWatcher extends EventEmitter {
       this.logger.debug('<-- getSpaceMetadata', { requestId })
       const audioSpace = response?.data?.audioSpace as AudioSpace
       delete audioSpace.sharings
-      this.logger.debug('audioSpace', audioSpace)
       const metadata = audioSpace?.metadata
       //this.logger.info('Space metadata', metadata)
       if (!metadata?.creator_results?.result?.rest_id) {
@@ -230,10 +229,14 @@ export class SpaceWatcher extends EventEmitter {
     try {
       const { data } = await axios.get<string>(this.dynamicPlaylistUrl)
       this.logger.debug('<-- checkDynamicPlaylist', { requestId })
+      this.logger.debug('Dynamic playlist url: ' + this.dynamicPlaylistUrl);
       const chunkIndexes = PeriscopeUtil.getChunks(data)
       if (chunkIndexes.length) {
         this.logger.debug(`Found chunks: ${chunkIndexes.join(',')}`)
         this.lastChunkIndex = Math.max(...chunkIndexes)
+        if (this.lastChunkIndex >= 1) {
+          await this.processLiveDownload()
+        }
       }
     } catch (error) {
       const status = error.response?.status
@@ -306,33 +309,51 @@ export class SpaceWatcher extends EventEmitter {
     }
   }
 
-  private async downloadAudio() {
-    this.logSpaceAudioDuration()
+  private async processLiveDownload() {
+    this.logger.debug('processLiveDownload')
+    try {
+      // Get latest metadata in case title changed
+      await this.getSpaceMetadata()
+      this.logSpaceInfo()
+
+      if (this.metadata.state === AudioSpaceMetadataState.RUNNING) {
+        await this.downloadAudio(true);
+        if (this.detected_phrases.length >= 1) {
+          this.sendWebhooks();
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`processLiveDownload: ${error.message}`)
+    }
+  }
+
+  private async downloadAudio(live=false) {
+    //this.logSpaceAudioDuration()
     try {
       const metadata = {
         title: this.spaceTitle,
         author: this.userDisplayName,
         artist: this.userDisplayName,
-        episode_id: this.spaceId,
+        episode_id: this.spaceId
       }
       //this.logger.info(`File name: ${this.filename}`)
       //this.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
       if (!this.downloader) {
         this.downloader = new SpaceDownloader(
           this.dynamicPlaylistUrl,
-          this.filename,
+          this.filename + '-chunk-' + this.lastChunkIndex,
           this.userScreenName,
-          metadata,
-        )
+          this.metadata.started_at || this.metadata.created_at,
+          metadata
+        );
+        this.detected_phrases = await this.downloader.download(live);
+        // remove downloader if live
+        if (live) {
+          this.downloader = null;
+        }
       }
-      this.detected_phrases = await this.downloader.download();
-      this.emit('complete');
     } catch (error) {
-      const ms = 10000
-      // Attemp to download transcode playlist right after space end could return 404
-      this.logger.error(`downloadAudio: ${error.message}`)
-      this.logger.info(`Retry download audio in ${ms}ms`)
-      setTimeout(() => this.downloadAudio(), ms)
+      this.logger.error(`downloadLiveAudio: ${error.message}`)
     }
   }
 

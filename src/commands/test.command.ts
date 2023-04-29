@@ -44,6 +44,7 @@ command
         space.playlist_url,
         name,
         space.username,
+        space.started_at,
         metadata,
       ).download()
     })

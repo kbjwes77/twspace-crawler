@@ -50,8 +50,7 @@ export class Webhook {
     try {
       this.logger.debug('--> post', {
         requestId,
-        url: url.replace(/.{60}$/, '****'),
-        body,
+        url: url.replace(/.{60}$/, '****')
       })
       const { data } = await axios.post(url, body)
       this.logger.debug('<-- post', { requestId })

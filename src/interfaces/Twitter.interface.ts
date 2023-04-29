@@ -1,6 +1,6 @@
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 
-export class DetectedPhrase {
+export class CaptionPhrase {
   constructor(
     public readonly ts: number,
     public readonly text: string
@@ -109,7 +109,7 @@ export interface AudioSpace {
   metadata: AudioSpaceMetadata
   participants: AudioSpaceParticipants
   sharings?: any
-  detected_phrases: DetectedPhrase[]
+  detected_phrases: CaptionPhrase[]
 }
 
 export interface LiveVideoStreamStatus {
