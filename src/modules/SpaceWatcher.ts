@@ -292,20 +292,17 @@ export class SpaceWatcher extends EventEmitter {
 
       if (this.metadata.state === AudioSpaceMetadataState.RUNNING) {
         // Recheck dynamic playlist in case host disconnect for a long time
-        this.checkDynamicPlaylistWithTimer()
-        return
+        return this.checkDynamicPlaylistWithTimer()
       }
 
       if (this.metadata.state === AudioSpaceMetadataState.ENDED && prevState === AudioSpaceMetadataState.RUNNING) {
-        //this.sendWebhooks()
+        await this.downloadAudio();
+        if (this.detected_phrases.length >= 1) {
+          this.sendWebhooks();
+        }
       }
     } catch (error) {
       this.logger.warn(`processDownload: ${error.message}`)
-    }
-
-    await this.downloadAudio();
-    if (this.detected_phrases.length >= 1) {
-      this.sendWebhooks();
     }
   }
 
@@ -341,7 +338,7 @@ export class SpaceWatcher extends EventEmitter {
       if (!this.downloader) {
         this.downloader = new SpaceDownloader(
           this.dynamicPlaylistUrl,
-          this.filename + '-chunk-' + this.lastChunkIndex,
+          this.filename + ((live) ? '-live' : ''),
           this.userScreenName,
           this.metadata.started_at || this.metadata.created_at,
           metadata

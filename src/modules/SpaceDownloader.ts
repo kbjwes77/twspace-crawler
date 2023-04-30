@@ -119,7 +119,7 @@ export class SpaceDownloader {
     this.logger.debug('download', { playlistUrl: this.playlistUrl, originUrl: this.originUrl })
     if (live) {
       this.playlistUrl = this.originUrl
-    } else if (!this.playlistUrl) {
+    } else {
       this.playlistUrl = await PeriscopeApi.getFinalPlaylistUrl(this.originUrl)
       this.logger.info(`Final playlist url: ${this.playlistUrl}`)
     }
@@ -127,7 +127,7 @@ export class SpaceDownloader {
     // Util.createMediaDir(this.subDir)
     // await this.saveFinalPlaylist()
     Util.createMediaDir(this.subDir)
-    await this.spawnFfmpeg();
+    await this.spawnFfmpeg(live);
     await this.spawnWhisper(live);
     return await this.processCaptions();
   }
@@ -154,19 +154,22 @@ export class SpaceDownloader {
   }
   */
 
-  private spawnFfmpeg() {
+  private spawnFfmpeg(live=false) {
     const time = Date.now();
 
     const cmd = 'ffmpeg'
-    const args = [
-      '-t',
-      '30',
+    const args = [];
+    if (live) {
+      // limit to 30 seconds for live transcription
+      args.push('-t', '30');
+    }
+    args.push(
       '-protocol_whitelist',
       'file,https,tls,tcp',
       '-i',
-      // this.playlistFile,
       this.playlistUrl
-    ]
+    );
+    // metadata for audio file
     if (this.metadata) {
       Object.keys(this.metadata).forEach((key) => {
         const value = this.metadata[key]
@@ -174,8 +177,9 @@ export class SpaceDownloader {
           return
         }
         args.push('-metadata', `${key}=${value}`)
-      })
+      });
     }
+    // output file
     args.push(this.audioFile)
     this.logger.verbose('Spawning FFMPEG to download audio...');
     this.logger.verbose(`${cmd} ${args.join(' ')}`)
@@ -215,7 +219,7 @@ export class SpaceDownloader {
         this.audioFile
       ];
       if (live) {
-        args.push('--model', 'tiny.en');
+        args.push('--model', 'base.en');
       } else {
         args.push('--model', 'small.en');
       }
