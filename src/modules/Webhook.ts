@@ -1,14 +1,18 @@
 import { codeBlock, inlineCode, time } from '@discordjs/builders'
-import axios from 'axios'
+import axios, { AxiosRequestConfig } from 'axios'
 import { randomUUID } from 'crypto'
 import winston from 'winston'
+import fs from 'fs';
+import path from 'path';
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 import { AudioSpace } from '../interfaces/Twitter.interface'
 import { discordWebhookLimiter } from '../Limiter'
 import { logger as baseLogger } from '../logger'
+import { Util } from '../utils/Util'
 import { SpaceUtil } from '../utils/SpaceUtil'
 import { TwitterUtil } from '../utils/TwitterUtil'
 import { configManager } from './ConfigManager'
+import FormData from 'form-data';
 
 const ms_to_hhmmss = function (ms: number): string {
   const seconds = Math.floor((ms / 1000) % 60);
@@ -22,18 +26,30 @@ const ms_to_hhmmss = function (ms: number): string {
   ].join(":");
 };
 
+const hex_to_integer = function(hex: string): number {
+  const start = hex.indexOf('0x') === 0 ? 2 : 0;
+  const bbggrr = hex.slice(start+4, start+6) + hex.slice(start+2, start+4) + hex.slice(start, start+2);
+  return parseInt(bbggrr, 16);
+};
+
 export class Webhook {
   private logger: winston.Logger
   private audiospace: AudioSpace
+  private directory: string
+  private audioFile: string
 
   constructor(
     private readonly audioSpace: AudioSpace,
     private readonly masterUrl: string,
+    private readonly filename: string,
+    private readonly subDir: string
   ) {
     this.audiospace = audioSpace;
-    const username = SpaceUtil.getHostUsername(audioSpace)
-    const spaceId = SpaceUtil.getId(audioSpace)
-    this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` })
+    this.directory = Util.getMediaDir(subDir);
+    this.audioFile = path.join(this.directory, `${filename}.mp3`);
+    const username = SpaceUtil.getHostUsername(audioSpace);
+    const spaceId = SpaceUtil.getId(audioSpace);
+    this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` });
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -108,9 +124,24 @@ export class Webhook {
         const payload = {
           content,
           embeds: [this.getEmbed(usernames, phrases)],
+        };
+        let payloadFile;
+        try {
+          const stats = fs.statSync(this.audioFile);
+          if (stats) {
+            payloadFile = this.getFilePayload();
+          }
+        } catch (error) {
+          this.logger.error('Audio file not found');
         }
         // Send
-        urls.forEach((url) => discordWebhookLimiter.schedule(() => this.post(url, payload)))
+        urls.forEach((url) => discordWebhookLimiter.schedule(() => {
+          this.post(url, payload);
+          if (payloadFile) {
+            payloadFile.submit(url);
+          }
+          return Promise.resolve(null);
+        }));
       } catch (error) {
         this.logger.error(`sendDiscord: ${error.message}`)
       }
@@ -166,36 +197,47 @@ export class Webhook {
   }
 
   private getEmbed(usernames: string[], phrases: string[]) {
-    const username = SpaceUtil.getHostUsername(this.audioSpace)
-    const name = SpaceUtil.getHostName(this.audioSpace)
-    const fields: any[] = [
-      {
-        name: 'Title',
-        value: codeBlock(SpaceUtil.getTitle(this.audioSpace)),
-      },
-    ]
+    const username = SpaceUtil.getHostUsername(this.audioSpace);
+    const name = SpaceUtil.getHostName(this.audioSpace);
+
+    let space_category_name = "";
+    const space_host = (configManager.config?.users || []).find((user) => user.username.toLowerCase() === username.toLowerCase());
+    if (space_host) {
+      space_category_name = space_host.category ?? "";
+    }
+    let space_color = "0xa0a0a1";
+    if (space_category_name) {
+      /** @todo fix space category color not working */
+      const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
+      if (space_category) {
+        space_color = space_category.color ?? "0xa0a0a1";
+        this.logger.info('space color hex: ' + space_color);
+        this.logger.info('space color dec: ' + hex_to_integer(space_color));
+      }
+    }
+
+    const fields: any[] = [{
+        name: (space_category_name) ? 'Category: ' + space_category_name : 'Other',
+        value: codeBlock(SpaceUtil.getTitle(this.audioSpace))
+    }];
 
     if ([AudioSpaceMetadataState.RUNNING, AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
       if (this.audioSpace.metadata.started_at) {
-        fields.push(
-          {
+        fields.push({
             name: '▶️ Started at',
             value: Webhook.getEmbedLocalTime(this.audioSpace.metadata.started_at),
             inline: true,
-          },
-        )
+        });
       }
     }
 
     if ([AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
       if (this.audioSpace.metadata.ended_at) {
-        fields.push(
-          {
+        fields.push({
             name: '⏹️ Ended at',
             value: Webhook.getEmbedLocalTime(Number(this.audioSpace.metadata.ended_at)),
             inline: true,
-          },
-        )
+        });
       }
     }
 
@@ -221,7 +263,7 @@ export class Webhook {
       type: 'rich',
       title: this.getEmbedTitle(usernames),
       description: TwitterUtil.getSpaceUrl(SpaceUtil.getId(this.audioSpace)),
-      color: 0x1d9bf0,
+      color: hex_to_integer(space_color),
       author: {
         name: `${name} (@${username})`,
         url: TwitterUtil.getUserUrl(username),
@@ -246,4 +288,12 @@ export class Webhook {
       time(Math.floor(ms / 1000), 'R'),
     ].join('\n')
   }
+
+  public getFilePayload() {
+    const form_data = new FormData();
+    form_data.append('username', SpaceUtil.getHostUsername(this.audioSpace));
+    form_data.append('avatar_url', SpaceUtil.getHostProfileImgUrl(this.audioSpace));
+    form_data.append('file', fs.createReadStream(this.audioFile));
+    return form_data;
+  };
 }

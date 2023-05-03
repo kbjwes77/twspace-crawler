@@ -1,9 +1,13 @@
 export interface Config {
   interval?: number
 
-  users?: (string | {
-    username: string
-    [key: string]: any
+  users?: ({
+    username: string,
+    category: string
+  })[]
+  categories?: ({
+    name: string,
+    color: string
   })[]
 
   webhooks?: {

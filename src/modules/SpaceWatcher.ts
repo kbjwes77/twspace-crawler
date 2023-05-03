@@ -175,7 +175,7 @@ export class SpaceWatcher extends EventEmitter {
       this.dynamicPlaylistUrl = this.liveStreamStatus.source.location
       this.logger.info(`Master playlist url: ${PeriscopeUtil.getMasterPlaylistUrl(this.dynamicPlaylistUrl)}`)
       this.logSpaceInfo()
-      this.sendWebhooks()
+      this.sendWebhooks(false)
     }
 
     if (!this.accessChatData) {
@@ -296,9 +296,9 @@ export class SpaceWatcher extends EventEmitter {
       }
 
       if (this.metadata.state === AudioSpaceMetadataState.ENDED && prevState === AudioSpaceMetadataState.RUNNING) {
-        await this.downloadAudio();
+        await this.downloadAudio(false);
         if (this.detected_phrases.length >= 1) {
-          this.sendWebhooks();
+          this.sendWebhooks(false);
         }
       }
     } catch (error) {
@@ -316,7 +316,7 @@ export class SpaceWatcher extends EventEmitter {
       if (this.metadata.state === AudioSpaceMetadataState.RUNNING) {
         await this.downloadAudio(true);
         if (this.detected_phrases.length >= 1) {
-          this.sendWebhooks();
+          this.sendWebhooks(true);
         }
       }
     } catch (error) {
@@ -335,7 +335,7 @@ export class SpaceWatcher extends EventEmitter {
       }
       //this.logger.info(`File name: ${this.filename}`)
       //this.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
-      if (!this.downloader) {
+      if ((!this.downloader) || (!live)) {
         this.downloader = new SpaceDownloader(
           this.dynamicPlaylistUrl,
           this.filename + ((live) ? '-live' : ''),
@@ -391,10 +391,12 @@ export class SpaceWatcher extends EventEmitter {
     notification.notify()
   }
 
-  private sendWebhooks() {
+  private sendWebhooks(live=false) {
     const webhook = new Webhook(
       this.audioSpace,
       PeriscopeUtil.getMasterPlaylistUrl(this.dynamicPlaylistUrl),
+      this.filename + ((live) ? '-live' : ''),
+      this.userScreenName
     )
     webhook.send()
   }

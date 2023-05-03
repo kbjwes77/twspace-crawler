@@ -44,20 +44,15 @@ const phrases = [
   {
     raw: [
       'groyper',
+      'groypur',
       'groiper',
       'grouper',
       'gripper',
       'graper',
-      'griper'
+      'griper',
+      'criper'
     ],
     fmt: 'groyper'
-  },
-  {
-    raw: [
-      'groyp',
-      'groip'
-    ],
-    fmt: 'groyp'
   },
   {
     raw: [
@@ -80,6 +75,14 @@ const phrases = [
       'Claremount',
     ],
     fmt: 'Claremont'
+  },
+  {
+    raw: [
+      "Where\'s my keys",
+      "Where is my keys",
+      "Where are my keys"
+    ],
+    fmt: "ACTIVATION PHRASE"
   }
 ].map((phrase) => {
   return {
@@ -164,6 +167,7 @@ export class SpaceDownloader {
       args.push('-t', '30');
     }
     args.push(
+      '-y',
       '-protocol_whitelist',
       'file,https,tls,tcp',
       '-i',
@@ -275,7 +279,7 @@ export class SpaceDownloader {
             let text = node.data.text.replace(/[.,#!\^;:{}=_`~()]/g, '');
             phrases.forEach((phrase) => {
               if (phrase.regexp.test(text)) {
-                text = text.replaceAll(phrase.regexp, phrase.format);
+                text = text.replaceAll(phrase.regexp, '**' + phrase.format + '**');
                 logger.debug('Detected caption phrase match');
                 logger.debug(text);
                 match = true;
