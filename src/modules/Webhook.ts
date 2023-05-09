@@ -28,8 +28,8 @@ const ms_to_hhmmss = function (ms: number): string {
 
 const hex_to_integer = function(hex: string): number {
   const start = hex.indexOf('0x') === 0 ? 2 : 0;
-  const bbggrr = hex.slice(start+4, start+6) + hex.slice(start+2, start+4) + hex.slice(start, start+2);
-  return parseInt(bbggrr, 16);
+  const rrggbb = hex.slice(start, start+2) + hex.slice(start+2, start+4) + hex.slice(start+4, start+6);
+  return parseInt(rrggbb, 16);
 };
 
 export class Webhook {
@@ -207,7 +207,6 @@ export class Webhook {
     }
     let space_color = "0xa0a0a1";
     if (space_category_name) {
-      /** @todo fix space category color not working */
       const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
       if (space_category) {
         space_color = space_category.color ?? "0xa0a0a1";
@@ -221,14 +220,20 @@ export class Webhook {
         value: codeBlock(SpaceUtil.getTitle(this.audioSpace))
     }];
 
-    if ([AudioSpaceMetadataState.RUNNING, AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
-      if (this.audioSpace.metadata.started_at) {
-        fields.push({
-            name: '▶️ Started at',
-            value: Webhook.getEmbedLocalTime(this.audioSpace.metadata.started_at),
-            inline: true,
-        });
-      }
+    if ([AudioSpaceMetadataState.RUNNING].includes(this.audioSpace.metadata.state as any)) {
+        if (this.audioSpace.metadata.started_at) {
+            fields.push({
+                name: '▶️ Started at',
+                value: Webhook.getEmbedLocalTime(this.audioSpace.metadata.started_at),
+                inline: true,
+            });
+        }
+        if (this.masterUrl) {
+            fields.push({
+                name: 'Playlist URL',
+                value: codeBlock(this.masterUrl),
+            });
+        }
     }
 
     if ([AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
@@ -247,17 +252,6 @@ export class Webhook {
         value: phrases.join('\n')
       });
     }
-
-    /*
-    if ([AudioSpaceMetadataState.RUNNING, AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
-      fields.push(
-        {
-          name: 'Playlist url',
-          value: codeBlock(this.masterUrl),
-        },
-      )
-    }
-    */
 
     const embed = {
       type: 'rich',
