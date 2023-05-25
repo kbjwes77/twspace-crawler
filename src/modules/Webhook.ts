@@ -251,7 +251,7 @@ export class Webhook {
          const users_muted = [];
         // admins
         admins.forEach((user) => {
-            const user_element = `[👑${user.display_name}](${user.twitter_screen_name})`;
+            const user_element = `[👑${user.twitter_screen_name}](https://twitter.com/${user.twitter_screen_name})`;
             if (user.is_muted_by_admin || user.is_muted_by_guest) {
                 users_muted.push(user_element);
             } else {
@@ -260,7 +260,7 @@ export class Webhook {
         });
         // speakers
         speakers.forEach((user) => {
-            const user_element = `[${user.display_name}](${user.twitter_screen_name})`;
+            const user_element = `[${user.twitter_screen_name}](https://twitter.com/${user.twitter_screen_name})`;
             if (user.is_muted_by_admin || user.is_muted_by_guest) {
                 users_muted.push(user_element);
             } else {
