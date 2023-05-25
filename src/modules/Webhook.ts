@@ -197,27 +197,10 @@ export class Webhook {
   }
 
   private getEmbed(usernames: string[], phrases: string[]) {
-    const username = SpaceUtil.getHostUsername(this.audioSpace);
-    const name = SpaceUtil.getHostName(this.audioSpace);
+    // fields
+    const fields: any[] = [];
 
-    let space_category_name = "";
-    const space_host = (configManager.config?.users || []).find((user) => user.username.toLowerCase() === username.toLowerCase());
-    if (space_host) {
-      space_category_name = space_host.category ?? "";
-    }
-    let space_color = "0xa0a0a1";
-    if (space_category_name) {
-      const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
-      if (space_category) {
-        space_color = space_category.color ?? "0xa0a0a1";
-      }
-    }
-
-    const fields: any[] = [{
-        name: (space_category_name) ? 'Category: ' + space_category_name : 'Other',
-        value: codeBlock(SpaceUtil.getTitle(this.audioSpace))
-    }];
-
+    // start/end time
     if ([AudioSpaceMetadataState.RUNNING].includes(this.audioSpace.metadata.state as any)) {
         if (this.audioSpace.metadata.started_at) {
             fields.push({
@@ -226,10 +209,20 @@ export class Webhook {
                 inline: true,
             });
         }
+
+        // twitter space URLs
+        const urls = [];
+        const spaceUrl = TwitterUtil.getSpaceUrl(SpaceUtil.getId(this.audioSpace));
+        if (spaceUrl) {
+            urls.push(`[Twitter Space](${spaceUrl})`);
+        }
         if (this.masterUrl) {
+            urls.push(`[M3U8 Stream](${this.masterUrl})`);
+        }
+        if (urls.length >= 1) {
             fields.push({
-                name: '📡 Stream URL',
-                value: `[M3U8 Link](${this.masterUrl})`,
+                name: '🔗 Links',
+                value: `[🌌 Twitter Space](${spaceUrl}), [📡 M3U8 Stream](${this.masterUrl})`,
             });
         }
     }
@@ -286,10 +279,28 @@ export class Webhook {
         });
     }
 
+    // space host name
+    const username = SpaceUtil.getHostUsername(this.audioSpace);
+    const name = SpaceUtil.getHostName(this.audioSpace);
+    // space category
+    let space_category_name = "";
+    const space_host = (configManager.config?.users || []).find((user) => user.username.toLowerCase() === username.toLowerCase());
+    if (space_host) {
+      space_category_name = space_host.category ?? "";
+    }
+    // space color
+    let space_color = "0xa0a0a1";
+    if (space_category_name) {
+      const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
+      if (space_category) {
+        space_color = space_category.color ?? "0xa0a0a1";
+      }
+    }
+
     const embed = {
       type: 'rich',
-      title: this.getEmbedTitle(usernames),
-      description: TwitterUtil.getSpaceUrl(SpaceUtil.getId(this.audioSpace)),
+      title: SpaceUtil.getTitle(this.audioSpace),
+      description: 'Category: ' + ((space_category_name) ? space_category_name : 'Other'),
       color: hex_to_integer(space_color),
       author: {
         name: `${name} (@${username})`,
