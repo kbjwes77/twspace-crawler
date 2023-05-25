@@ -1,14 +1,12 @@
-import axios from 'axios'
-import { spawn, SpawnOptions } from 'child_process'
-import { writeFileSync, createReadStream } from 'fs'
-import { parse } from 'subtitle'
-import path from 'path'
-import winston from 'winston'
-import { PeriscopeApi } from '../apis/PeriscopeApi'
-import { logger as baseLogger } from '../logger'
-import { PeriscopeUtil } from '../utils/PeriscopeUtil'
-import { Util } from '../utils/Util'
-import { CaptionPhrase } from '../interfaces/Twitter.interface'
+import { spawn, SpawnOptions } from 'child_process';
+import { createReadStream } from 'fs';
+import { parse } from 'subtitle';
+import path from 'path';
+import winston from 'winston';
+import { PeriscopeApi } from '../apis/PeriscopeApi';
+import { logger as baseLogger } from '../logger';
+import { Util } from '../utils/Util';
+import { CaptionPhrase } from '../interfaces/Twitter.interface';
 
 const phrases = [
 	{
@@ -79,6 +77,16 @@ const phrases = [
 	},
 	{
 		raw: [
+			'National Conservatism',
+			'National Conservative',
+			'NatCon',
+			'Nacon',
+			'Nakon'
+		],
+		fmt: 'NatCon'
+	},
+	{
+		raw: [
 			"Where\'s my keys",
 			"Where is my keys",
 			"Where are my keys"
@@ -101,6 +109,13 @@ const phrases = [
 			"Spoos"
 		],
 		fmt: "Spoods"
+	},
+	{
+		raw: [
+			"Chief Trumpster",
+			"Chief Trump"
+		],
+		fmt: "Chief Trumpster"
 	}
 ].map((phrase) => {
 	return {
@@ -126,59 +141,33 @@ export class SpaceDownloader {
 		private readonly started_at: number,
 		private readonly metadata?: Record<string, any>
 	) {
-		this.logger = baseLogger.child({ label: '[SpaceDownloader]' })
+		this.logger = baseLogger.child({ label: '[Audio]' })
 		this.directory = Util.getMediaDir(subDir);
 		this.playlistFile = path.join(this.directory, `${filename}.m3u8`)
 		this.audioFile = path.join(this.directory, `${filename}.mp3`)
 		this.subsFile = path.join(this.directory, `${filename}.mp3.vtt`);
 		this.timeStarted = started_at;
-		this.logger.verbose(`Playlist path: "${this.playlistFile}"`)
-		this.logger.verbose(`Audio path: "${this.audioFile}"`)
 	}
 
 	public async download(live = false) {
-		this.logger.debug('download', { playlistUrl: this.playlistUrl, originUrl: this.originUrl })
 		if (live) {
 			this.playlistUrl = this.originUrl
 		} else {
 			this.playlistUrl = await PeriscopeApi.getFinalPlaylistUrl(this.originUrl)
-			this.logger.info(`Final playlist url: ${this.playlistUrl}`)
 		}
 
 		// Util.createMediaDir(this.subDir)
 		// await this.saveFinalPlaylist()
 		Util.createMediaDir(this.subDir)
-		await this.spawnFfmpeg(live);
+		await this.spawnFFMPEG(live);
 		await this.spawnWhisper(live);
 		return await this.processCaptions();
 	}
 
-	/*
-	private async saveFinalPlaylist() {
-		try {
-			this.logger.debug(`--> saveFinalPlaylist: ${this.playlistUrl}`)
-			const { data } = await axios.get<string>(this.playlistUrl)
-			this.logger.debug(`<-- saveFinalPlaylist: ${this.playlistUrl}`)
-			const prefix = PeriscopeUtil.getChunkPrefix(this.playlistUrl)
-			this.logger.debug(`Chunk prefix: ${prefix}`)
-			const newData = data.replace(/^chunk/gm, `${prefix}chunk`)
-			writeFileSync(this.playlistFile, newData)
-			this.logger.verbose(`Playlist saved to "${this.playlistFile}"`)
-		} catch (error) {
-			this.logger.debug(`saveFinalPlaylist: ${error.message}`)
-			const status = error.response?.status
-			if (status === 404 && this.originUrl !== this.playlistUrl) {
-				this.playlistUrl = null
-			}
-			throw error
-		}
-	}
-	*/
-
-	private spawnFfmpeg(live = false) {
+	private spawnFFMPEG(live = false) {
 		const time = Date.now();
 
-		const cmd = 'ffmpeg'
+		const cmd = 'ffmpeg';
 		const args = [];
 		if (live) {
 			// limit to 30 seconds for live transcription
@@ -194,17 +183,13 @@ export class SpaceDownloader {
 		// metadata for audio file
 		if (this.metadata) {
 			Object.keys(this.metadata).forEach((key) => {
-				const value = this.metadata[key]
-				if (!value) {
-					return
-				}
+				const value = this.metadata[key];
+				if (!value) return;
 				args.push('-metadata', `${key}=${value}`)
 			});
 		}
 		// output file
 		args.push(this.audioFile)
-		this.logger.verbose('Spawning FFMPEG to download audio...');
-		this.logger.verbose(`${cmd} ${args.join(' ')}`)
 
 		// https://github.com/nodejs/node/issues/21825
 		const spawnOptions: SpawnOptions = {
@@ -216,14 +201,13 @@ export class SpaceDownloader {
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		const cp = process.platform === 'win32'
 			? spawn(process.env.comspec, ['/c', cmd, ...args], spawnOptions)
-			: spawn(cmd, args, spawnOptions)
-		// cp.unref()
+			: spawn(cmd, args, spawnOptions);
 
 		const logger = this.logger;
 		return new Promise((resolve, reject) => {
 			cp.on('close', function (code) {
-				const elapsed = Math.round(((Date.now() - time) / (1000 * 60)) * 10) / 10;
-				logger.info(`Audio downloaded, FFMPEG exited after ${elapsed} minutes`);
+				const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
+				logger.info(`Audio downloaded after ${seconds}s`);
 				resolve(true);
 			});
 			cp.on('error', function (error) {
@@ -246,30 +230,20 @@ export class SpaceDownloader {
 				args.push('--model', 'small.en');
 			}
 
-			logger.debug('Spawning Whisper to transcribe audio...');
-			logger.debug(`${cmd} ${args.join(' ')}`);
-
 			const spawnOptions: SpawnOptions = {
 				cwd: this.directory,
 				stdio: 'pipe',
 				detached: false,
 				windowsHide: true,
 			};
-
 			// eslint-disable-next-line @typescript-eslint/no-unused-vars
 			const cp = process.platform === 'win32'
 				? spawn(process.env.comspec, ['/c', cmd, ...args], spawnOptions)
 				: spawn(cmd, args, spawnOptions);
 
-			let time_data = Date.now();
-			cp.stdout.on('data', function (data) {
-				const elapsed = Math.round(((Date.now() - time_data) / 1000) * 10) / 10;
-				logger.debug(`Audio data transcribed in ${elapsed} seconds`);
-				time_data = Date.now();
-			});
 			cp.on('close', function (code) {
-				const elapsed = Math.round(((Date.now() - time) / (1000 * 60)) * 10) / 10;
-				logger.info(`Audio transcribed, Whisper exited after ${elapsed} minutes`);
+				const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
+				logger.info(`Audio transcribed after ${seconds}s`);
 				resolve(true);
 			});
 			cp.on('error', function (error) {
@@ -287,8 +261,6 @@ export class SpaceDownloader {
 
 		const logger = this.logger;
 		return new Promise((resolve, reject) => {
-			logger.debug('Processing captions...');
-
 			let match = false;
 			try {
 				createReadStream(this.subsFile)
@@ -299,8 +271,6 @@ export class SpaceDownloader {
 							phrases.forEach((phrase) => {
 								if (phrase.regexp.test(text)) {
 									text = text.replaceAll(phrase.regexp, '**' + phrase.format + '**');
-									logger.debug('Detected caption phrase match');
-									logger.debug(text);
 									match = true;
 								}
 							});
@@ -312,8 +282,8 @@ export class SpaceDownloader {
 						resolve([]);
 					})
 					.on('finish', function () {
-						const completed = Math.round(((Date.now() - time) / 1000) * 10) / 10;
-						logger.debug('Captions processed in ' + completed + ' seconds');
+						const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
+						logger.debug(`Captions scanned in ${seconds}s`);
 						if (match === true) {
 							resolve(caption_phrases);
 						} else {
@@ -322,7 +292,7 @@ export class SpaceDownloader {
 					});
 			} catch(error) {
 				if (error.code === 'ENOENT') {
-					logger.error("Captions file '" + this.subsFile + "' not found");
+					logger.error(`Captions file '${this.subsFile}' not found`);
 				} else {
 					logger.error('Failed to process captions ' + error.message);
 				}
@@ -330,4 +300,4 @@ export class SpaceDownloader {
 			}
 		});
 	};
-}
+};

@@ -36,7 +36,7 @@ export class UserListWatcher extends EventEmitter {
     const requestId = randomUUID()
     const usernames = users.map((v) => v.username)
     const userIds = users.map((v) => v.id)
-    this.logger.debug('--> getSpaces', { requestId, userCount: usernames.length, usernames })
+    this.logger.debug('--> getSpaces', { requestId, userCount: usernames.length })
     try {
       const liveSpaceIds: string[] = []
       if (Util.getTwitterAuthorization()) {
@@ -66,8 +66,9 @@ export class UserListWatcher extends EventEmitter {
         )
       }
       if (liveSpaceIds.length) {
-        this.logger.debug(`Live space ids: ${liveSpaceIds.join(',')}`)
-        liveSpaceIds.forEach((id) => this.emit('data', id))
+        const uniqueSpaceIds = [...new Set(liveSpaceIds)];
+        this.logger.debug(`Live Spaces: ${uniqueSpaceIds.join(', ')}`)
+        uniqueSpaceIds.forEach((id) => this.emit('data', id));
       }
     } catch (error) {
       this.logger.error(`getSpaces: ${error.message}`, {

@@ -210,8 +210,6 @@ export class Webhook {
       const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
       if (space_category) {
         space_color = space_category.color ?? "0xa0a0a1";
-        this.logger.info('space color hex: ' + space_color);
-        this.logger.info('space color dec: ' + hex_to_integer(space_color));
       }
     }
 
@@ -231,7 +229,7 @@ export class Webhook {
         if (this.masterUrl) {
             fields.push({
                 name: 'Playlist URL',
-                value: codeBlock(this.masterUrl),
+                value: `[📡 M3U8 Stream](${this.masterUrl})`,
             });
         }
     }
@@ -253,6 +251,24 @@ export class Webhook {
       });
     }
 
+    const admins = SpaceUtil.getAdmins(this.audioSpace);
+    const speakers = SpaceUtil.getSpeakers(this.audioSpace);
+    if ((admins.length + speakers.length) >= 1) {
+      const users_speaking = [];
+        admins
+            .filter((user) => (!user.is_muted_by_admin && !user.is_muted_by_guest))
+            .map((user) => `[👑${user.twitter_screen_name}](${user.avatar_url})`)
+            .forEach((user) => users_speaking.push(user));
+        speakers
+            .filter((user) => (!user.is_muted_by_admin && !user.is_muted_by_guest))
+            .map((user) => `[${user.twitter_screen_name}](${user.avatar_url})`)
+            .forEach((user) => users_speaking.push(user));
+      fields.push({
+        name: 'Speakers',
+        value: users_speaking.join(', ')
+      });
+    }
+
     const embed = {
       type: 'rich',
       title: this.getEmbedTitle(usernames),
@@ -261,7 +277,7 @@ export class Webhook {
       author: {
         name: `${name} (@${username})`,
         url: TwitterUtil.getUserUrl(username),
-        icon_url: SpaceUtil.getHostProfileImgUrl(this.audioSpace),
+        icon_url: SpaceUtil.getHostProfileImgUrl(this.audioSpace)
       },
       fields,
       footer: {

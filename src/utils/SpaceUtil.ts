@@ -34,6 +34,14 @@ export class SpaceUtil {
     return audioSpace?.metadata?.creator_results?.result?.legacy?.profile_banner_url
   }
 
+  public static getAdmins(audioSpace: AudioSpace): AudioSpaceParticipant[] {
+    return audioSpace?.participants?.admins || [];
+  }
+
+  public static getSpeakers(audioSpace: AudioSpace): AudioSpaceParticipant[] {
+    return audioSpace?.participants?.speakers || [];
+  }
+
   public static getParticipant(participants: AudioSpaceParticipant[], username: string): AudioSpaceParticipant {
     return participants?.find?.((v) => v?.twitter_screen_name?.toLowerCase?.() === username?.toLowerCase?.())
   }
