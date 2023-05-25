@@ -228,8 +228,8 @@ export class Webhook {
         }
         if (this.masterUrl) {
             fields.push({
-                name: 'Playlist URL',
-                value: `[📡 M3U8 Stream](${this.masterUrl})`,
+                name: '📡 Stream URL',
+                value: `[M3U8 Link](${this.masterUrl})`,
             });
         }
     }
@@ -254,19 +254,36 @@ export class Webhook {
     const admins = SpaceUtil.getAdmins(this.audioSpace);
     const speakers = SpaceUtil.getSpeakers(this.audioSpace);
     if ((admins.length + speakers.length) >= 1) {
-      const users_speaking = [];
-        admins
-            .filter((user) => (!user.is_muted_by_admin && !user.is_muted_by_guest))
-            .map((user) => `[👑${user.twitter_screen_name}](${user.avatar_url})`)
-            .forEach((user) => users_speaking.push(user));
-        speakers
-            .filter((user) => (!user.is_muted_by_admin && !user.is_muted_by_guest))
-            .map((user) => `[${user.twitter_screen_name}](${user.avatar_url})`)
-            .forEach((user) => users_speaking.push(user));
-      fields.push({
-        name: 'Speakers',
-        value: users_speaking.join(', ')
-      });
+        const users_speaking = [];
+         const users_muted = [];
+        // admins
+        admins.forEach((user) => {
+            const user_element = `[👑${user.twitter_screen_name}](${user.avatar_url})`;
+            if (user.is_muted_by_admin || user.is_muted_by_guest) {
+                users_muted.push(user_element);
+            } else {
+                users_speaking.push(user_element);
+            }
+        });
+        // speakers
+        speakers.forEach((user) => {
+            const user_element = `[${user.twitter_screen_name}](${user.avatar_url})`;
+            if (user.is_muted_by_admin || user.is_muted_by_guest) {
+                users_muted.push(user_element);
+            } else {
+                users_speaking.push(user_element);
+            }
+        });
+        // speaking participants
+        fields.push({
+            name: '🎙️ Active Speakers',
+            value: users_speaking.join(', ')
+        });
+        // muted participants
+        fields.push({
+            name: '🔇 Muted Speakers',
+            value: users_muted.join(', ')
+        });
     }
 
     const embed = {
