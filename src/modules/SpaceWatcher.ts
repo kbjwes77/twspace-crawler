@@ -287,12 +287,8 @@ export class SpaceWatcher extends EventEmitter {
         return this.checkDynamicPlaylistWithTimer();
       }
 
-      if (this.metadata.state === AudioSpaceMetadataState.ENDED && prevState === AudioSpaceMetadataState.RUNNING) {
-        await this.downloadAudio(false);
-        if (this.detected_phrases.length >= 1) {
-          this.sendWebhooks(false);
-        }
-      }
+      // download space audio
+      await this.downloadAudio(false);
     } catch (error) {
       this.logger.warn(`processDownload: ${error.message}`);
     }

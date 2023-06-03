@@ -27,7 +27,7 @@ const ms_to_hhmmss = function (ms: number): string {
 };
 
 const hex_to_integer = function(hex: string): number {
-  const start = hex.indexOf('0x') === 0 ? 2 : 0;
+  const start = hex.indexOf('#') === 0 ? 1 : 0;
   const rrggbb = hex.slice(start, start+2) + hex.slice(start+2, start+4) + hex.slice(start+4, start+6);
   return parseInt(rrggbb, 16);
 };
@@ -77,245 +77,230 @@ export class Webhook {
     return null
   }
 
-  private sendDiscord() {
-    this.logger.debug('sendDiscord')
-    const configs = Array.from(this.config?.discord || [])
-    configs.forEach((config) => {
-      if (!config.active) {
-        return
-      }
-      const urls = Array.from(config.urls || [])
-        .filter((v) => v)
-      const usernames = Array.from(config.usernames || [])
-        .filter((v) => v)
-        .map((v) => v.toLowerCase())
-      if (!urls.length || !usernames.length) {
-        return
-      }
-      if (!usernames.find((v) => v === '<all>') && usernames.every((v) => !SpaceUtil.isParticipant(this.audioSpace, v))) {
-        return
-      }
-      try {
-        // Build content with mentions
-        let content = ''
-        if (this.audioSpace.metadata.state === AudioSpaceMetadataState.RUNNING) {
-          Array.from(config.mentions?.roleIds || []).map((v) => v).forEach((roleId) => {
-            content += `<@&${roleId}> `
-          })
-          Array.from(config.mentions?.userIds || []).map((v) => v).forEach((userId) => {
-            content += `<@${userId}> `
-          })
-          content = [content, config.startMessage].filter((v) => v).map((v) => v.trim()).join(' ')
-        }
-        if (this.audioSpace.metadata.state === AudioSpaceMetadataState.ENDED) {
-          content = [content, config.endMessage].filter((v) => v).map((v) => v.trim()).join(' ')
-        }
-        content = content.trim()
+	private sendDiscord() {
+		this.logger.debug('sendDiscord');
+		const configs = Array.from(this.config?.discord || []);
+		configs.forEach((config) => {
+			if (!config.active) {
+				return;
+			}
+			const urls = Array.from(config.urls || [])
+				.filter((v) => v)
+			const usernames = Array.from(config.usernames || [])
+				.filter((v) => v)
+				.map((v) => v.toLowerCase())
+			if (!urls.length || !usernames.length) {
+				return;
+			}
+			if (!usernames.find((v) => v === '<all>') && usernames.every((v) => !SpaceUtil.isParticipant(this.audioSpace, v))) {
+				return;
+			}
 
-        const phrases: string[] = [];
-        if ((Array.isArray(this.audiospace.detected_phrases)) && (this.audiospace.detected_phrases.length >= 1)) {
-          this.audiospace.detected_phrases.forEach((phrase) => {
-            const hhmmss = ms_to_hhmmss(phrase.ts);
-            phrases.push(hhmmss + ' ' + phrase.text);
-          });
-        }
+			const space_info = this.getSpaceInfo();
 
-        // Build request payload
-        const payload = {
-          content,
-          embeds: [this.getEmbed(usernames, phrases)],
-        };
-        let payloadFile;
-        try {
-          const stats = fs.statSync(this.audioFile);
-          if (stats) {
-            payloadFile = this.getFilePayload();
-          }
-        } catch (error) {
-          this.logger.error('Audio file not found');
-        }
-        // Send
-        urls.forEach((url) => discordWebhookLimiter.schedule(() => {
-          this.post(url, payload);
-          if (payloadFile) {
-            payloadFile.submit(url);
-          }
-          return Promise.resolve(null);
-        }));
-      } catch (error) {
-        this.logger.error(`sendDiscord: ${error.message}`)
-      }
-    })
-  }
+			try {
+				// Build content with mentions
+				let content = '';
+				if (this.audioSpace.metadata.state === AudioSpaceMetadataState.RUNNING) {
+					Array.from(config.mentions?.roleIds || []).map((v) => v).forEach((roleId) => {
+						content += `<@&${roleId}> `;
+					})
+					Array.from(config.mentions?.userIds || []).map((v) => v).forEach((userId) => {
+						content += `<@${userId}> `;
+					})
+					content = [content, config.startMessage].filter((v) => v).map((v) => v.trim()).join(' ');
+				}
+				if (this.audioSpace.metadata.state === AudioSpaceMetadataState.ENDED) {
+					content = [content, config.endMessage].filter((v) => v).map((v) => v.trim()).join(' ');
+				}
+				content = content.trim();
 
-  private getEmbedTitle(usernames: string[]): string {
-    const hostUsername = SpaceUtil.getHostUsername(this.audioSpace)
-    const host = inlineCode(hostUsername)
+				// prepare discord webhook payload
+				const payload = {
+					content,
+					embeds: [this.getEmbed(space_info)],
+				};
+				// prepare discord webhook file payload
+				let payloadFile;
+				try {
+					const stats = fs.statSync(this.audioFile);
+					if (stats) {
+						payloadFile = this.getFilePayload();
+					}
+				} catch (error) {
+					this.logger.error('Audio file not found');
+				}
+				// send discord webhooks
+				urls.forEach((url) => discordWebhookLimiter.schedule(() => {
+					this.post(url, payload);
+					if (payloadFile) {
+						payloadFile.submit(url);
+					}
+					return Promise.resolve(null);
+				}));
+			} catch (error) {
+				this.logger.error(`sendDiscord: ${error.message}`);
+			}
 
-    if (this.audioSpace.metadata.state === AudioSpaceMetadataState.ENDED) {
-      return `${host} Space ended`
-    }
+			// send cozy captions webhook
+			const body = {
+				'space': space_info
+			}
+			fetch('https://cozycaptions.com/twitter-crawler/create', { 'method': 'PUT', 'headers': { 'Content-Type': 'application/json' }, 'body': JSON.stringify(body) })
+				.then((response) => response.json())
+				.then((response) => {
+					if (response.error) throw Error(response.error);
+				})
+				.catch((error) => {
+					this.logger.error(`sendCozycaptions: ${error}`);
+				});
+		});
+	};
 
-    if (!usernames.some((v) => v.toLowerCase() === hostUsername.toLowerCase())
-      && usernames.some((v) => SpaceUtil.isAdmin(this.audioSpace, v))) {
-      const participants = usernames
-        .map((v) => SpaceUtil.getParticipant(this.audioSpace.participants.admins, v))
-        .filter((v) => v)
-      if (participants.length) {
-        const guests = participants
-          .map((v) => inlineCode(v.twitter_screen_name))
-          .join(', ')
-        return `${guests} is co-hosting ${host}'s Space`
-      }
-    }
+	private getSpaceInfo() {
+		const host_username = SpaceUtil.getHostUsername(this.audioSpace);
 
-    if (usernames.some((v) => SpaceUtil.isSpeaker(this.audioSpace, v))) {
-      const participants = usernames
-        .map((v) => SpaceUtil.getParticipant(this.audioSpace.participants.speakers, v))
-        .filter((v) => v)
-      if (participants.length) {
-        const guests = participants
-          .map((v) => inlineCode(v.twitter_screen_name))
-          .join(', ')
-        return `${guests} is speaking in ${host}'s Space`
-      }
-    }
+		const info = {
+			'host': host_username,
+			'title': SpaceUtil.getTitle(this.audioSpace),
+			'category': "Other",
+			'color': "#a0a0a1",
+			'space_url': TwitterUtil.getSpaceUrl(SpaceUtil.getId(this.audioSpace)),
+			'playlist_url': this.masterUrl,
+			'date_started': new Date(),
+			'captions': [],
+			'speakers': [],
+			'listener_count': undefined
+		};
 
-    if (usernames.some((v) => SpaceUtil.isListener(this.audioSpace, v))) {
-      const participants = usernames
-        .map((v) => SpaceUtil.getParticipant(this.audioSpace.participants.listeners, v))
-        .filter((v) => v)
-      if (participants.length) {
-        const guests = participants
-          .map((v) => inlineCode(v.twitter_screen_name))
-          .join(', ')
-        return `${guests} is listening in ${host}'s Space`
-      }
-    }
+		// category
+		const space_host = (configManager.config?.users || []).find((user) => user.username.toLowerCase() === info.host.toLowerCase());
+		if (space_host) {
+		  	info.category = space_host?.category ?? "Other";
+		}
+		// color
+		const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === info.category.toLowerCase());
+		if (space_category) {
+			info.color = space_category?.color ?? "#a0a0a1";
+		}
+		// date started
+		if (this.audioSpace.metadata.started_at) {
+			info.date_started = new Date(this.audioSpace.metadata.started_at);
+		}
+		// captions
+		if (Array.isArray(this.audioSpace.detected_phrases)) {
+			info.captions = this.audioSpace.detected_phrases;
+		}
+		// speakers
+		const space_hosts = SpaceUtil.getAdmins(this.audioSpace);
+		const space_speakers = SpaceUtil.getSpeakers(this.audioSpace);
+		if ((space_hosts.length + space_speakers.length) >= 1) {
+			// admins
+			space_hosts.forEach((user) => {
+				const role = (user.twitter_screen_name === info.host) ? 'host' : 'co-host';
+				info.speakers.push({
+					'username': user.twitter_screen_name,
+					'nickname': (role === 'host') ? SpaceUtil.getHostName(this.audioSpace) : undefined,
+					'photo_url': (role === 'host') ? SpaceUtil.getHostProfileImgUrl(this.audioSpace) : undefined,
+					'flags': {
+						'role': (user.twitter_screen_name === info.host) ? 'host' : 'co-host',
+						'muted': (user.is_muted_by_admin || user.is_muted_by_guest) ? true : false
+					}
+				});
+			});
+			// speakers
+			space_speakers.forEach((user) => {
+				info.speakers.push({
+					'username': user.twitter_screen_name,
+					'flags': {
+						'role': 'speaker',
+						'muted': (user.is_muted_by_admin || user.is_muted_by_guest) ? true : false
+					}
+				});
+			});
+		}
 
-    return `${host} is hosting a Space`
-  }
+		return info;
+	};
 
-  private getEmbed(usernames: string[], phrases: string[]) {
-    // fields
-    const fields: any[] = [];
+	private getEmbed(space_info: any) {
+		// fields
+		const fields: any[] = [];
 
-    // start/end time
-    if ([AudioSpaceMetadataState.RUNNING].includes(this.audioSpace.metadata.state as any)) {
-        if (this.audioSpace.metadata.started_at) {
-            fields.push({
-                name: '▶️ Started at',
-                value: Webhook.getEmbedLocalTime(this.audioSpace.metadata.started_at),
-                inline: true,
-            });
-        }
+		// space started
+		if ([AudioSpaceMetadataState.RUNNING].includes(this.audioSpace.metadata.state as any)) {
+			fields.push({
+				name: '▶️ Started at',
+				value: Webhook.getEmbedLocalTime(space_info.date_started.getTime()),
+				inline: true,
+			});
 
-        // twitter space URLs
-        const urls = [];
-        const spaceUrl = TwitterUtil.getSpaceUrl(SpaceUtil.getId(this.audioSpace));
-        if (spaceUrl) {
-            urls.push(`[Twitter Space](${spaceUrl})`);
-        }
-        if (this.masterUrl) {
-            urls.push(`[M3U8 Stream](${this.masterUrl})`);
-        }
-        if (urls.length >= 1) {
-            fields.push({
-                name: '🔗 Links',
-                value: `[🌌 Twitter Space](${spaceUrl}), [📡 M3U8 Stream](${this.masterUrl})`,
-            });
-        }
-    }
+			// space links
+			if (space_info.space_url && space_info.playlist_url) {
+				fields.push({
+					name: '🔗 Links',
+					value: `[🌌 Twitter Space](${space_info.space_url}) [📡 M3U8 Stream](${space_info.playlist_url})`,
+				});
+			}
+		}
 
-    if ([AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
-      if (this.audioSpace.metadata.ended_at) {
-        fields.push({
-            name: '⏹️ Ended at',
-            value: Webhook.getEmbedLocalTime(Number(this.audioSpace.metadata.ended_at)),
-            inline: true,
-        });
-      }
-    }
+		// space ended
+		if ([AudioSpaceMetadataState.ENDED].includes(this.audioSpace.metadata.state as any)) {
+			if (this.audioSpace.metadata.ended_at) {
+				fields.push({
+					name: '⏹️ Ended at',
+					value: Webhook.getEmbedLocalTime(Number(this.audioSpace.metadata.ended_at)),
+					inline: true,
+				});
+			}
+		}
 
-    if (phrases.length >= 1) {
-      fields.push({
-        name: 'Detected Phrases',
-        value: phrases.join('\n')
-      });
-    }
+		// captions snapshot
+		if (space_info.captions.length >= 1) {
+			const captions = space_info.captions.map((caption) => ms_to_hhmmss(caption.ts) + ' ' + caption.text);
+			fields.push({
+				name: 'Snapshot',
+				value: captions.join('\n')
+			});
+		}
 
-    const admins = SpaceUtil.getAdmins(this.audioSpace);
-    const speakers = SpaceUtil.getSpeakers(this.audioSpace);
-    if ((admins.length + speakers.length) >= 1) {
-        const users_speaking = [];
-         const users_muted = [];
-        // admins
-        admins.forEach((user) => {
-            const user_element = `[👑${user.twitter_screen_name}](https://twitter.com/${user.twitter_screen_name})`;
-            if (user.is_muted_by_admin || user.is_muted_by_guest) {
-                users_muted.push(user_element);
-            } else {
-                users_speaking.push(user_element);
-            }
-        });
-        // speakers
-        speakers.forEach((user) => {
-            const user_element = `[${user.twitter_screen_name}](https://twitter.com/${user.twitter_screen_name})`;
-            if (user.is_muted_by_admin || user.is_muted_by_guest) {
-                users_muted.push(user_element);
-            } else {
-                users_speaking.push(user_element);
-            }
-        });
-        // speaking participants
-        fields.push({
-            name: '🎙️ Active Speakers',
-            value: users_speaking.join(', ')
-        });
-        // muted participants
-        fields.push({
-            name: '🔇 Muted Speakers',
-            value: users_muted.join(', ')
-        });
-    }
+		if (space_info.speakers.length >= 1) {
+			const speakers_active = space_info.speakers.filter((speaker) => speaker.flags.muted === false);
+			const speakers_inactive = space_info.speakers.filter((speaker) => speaker.flags.muted === true);
+			// speaking participants
+			fields.push({
+				name: '🎙️ Active Speakers',
+				value: speakers_active.map((s) => `[${(s.flags.role === 'host' || s.flags.role === 'co-host') ? '👑' : ''}${s.username}](https://twitter.com/${s.username})`).join(', ')
+			});
+			// muted participants
+			fields.push({
+				name: '🔇 Muted Speakers',
+				value: speakers_inactive.map((s) => `[${(s.flags.role === 'host' || s.flags.role === 'co-host') ? '👑' : ''}${s.username}](https://twitter.com/${s.username})`).join(', ')
+			});
+		}
 
-    // space host name
-    const username = SpaceUtil.getHostUsername(this.audioSpace);
-    const name = SpaceUtil.getHostName(this.audioSpace);
-    // space category
-    let space_category_name = "";
-    const space_host = (configManager.config?.users || []).find((user) => user.username.toLowerCase() === username.toLowerCase());
-    if (space_host) {
-      space_category_name = space_host.category ?? "";
-    }
-    // space color
-    let space_color = "0xa0a0a1";
-    if (space_category_name) {
-      const space_category = (configManager.config?.categories || []).find((category) => category.name.toLowerCase() === space_category_name.toLowerCase());
-      if (space_category) {
-        space_color = space_category.color ?? "0xa0a0a1";
-      }
-    }
+		const speaker_host = space_info.speakers.find((speaker) => speaker.flags.role === 'host');
+		const host_nickname = speaker_host?.nickname ?? 'Unknown';
+		const host_username = speaker_host?.username ?? '';
+		const host_photo_url = speaker_host?.photo_url ?? '';
 
-    const embed = {
-      type: 'rich',
-      title: SpaceUtil.getTitle(this.audioSpace),
-      description: 'Category: ' + ((space_category_name) ? space_category_name : 'Other'),
-      color: hex_to_integer(space_color),
-      author: {
-        name: `${name} (@${username})`,
-        url: TwitterUtil.getUserUrl(username),
-        icon_url: SpaceUtil.getHostProfileImgUrl(this.audioSpace)
-      },
-      fields,
-      footer: {
-        text: 'Twitter',
-        icon_url: 'https://abs.twimg.com/favicons/twitter.2.ico',
-      },
-    }
-
-    return embed
-  }
+		return {
+			type: 'rich',
+			title: space_info.title,
+			description: 'Category: ' + space_info.category,
+			color: hex_to_integer(space_info.color),
+			author: {
+				name: `${host_nickname} (@${host_username})`,
+				url: 'https://twitter.com/' + host_username,
+				icon_url: host_photo_url
+			},
+			fields,
+			footer: {
+				text: 'Twitter',
+				icon_url: 'https://abs.twimg.com/favicons/twitter.2.ico',
+			}
+		};
+	};
 
   public static getEmbedLocalTime(ms: number) {
     if (!ms) {
@@ -327,11 +312,11 @@ export class Webhook {
     ].join('\n')
   }
 
-  public getFilePayload() {
-    const form_data = new FormData();
-    form_data.append('username', SpaceUtil.getHostUsername(this.audioSpace));
-    form_data.append('avatar_url', SpaceUtil.getHostProfileImgUrl(this.audioSpace));
-    form_data.append('file', fs.createReadStream(this.audioFile));
-    return form_data;
-  };
+	public getFilePayload() {
+		const form_data = new FormData();
+		form_data.append('username', SpaceUtil.getHostUsername(this.audioSpace));
+		form_data.append('avatar_url', SpaceUtil.getHostProfileImgUrl(this.audioSpace));
+		form_data.append('file', fs.createReadStream(this.audioFile));
+		return form_data;
+	};
 }

@@ -1,5 +1,6 @@
 import { spawn, SpawnOptions } from 'child_process';
 import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
 import { parse } from 'subtitle';
 import path from 'path';
 import winston from 'winston';
@@ -32,12 +33,6 @@ const phrases = [
 			'F Pack'
 		],
 		fmt: 'AFPAC'
-	},
-	{
-		raw: [
-			'America First'
-		],
-		fmt: 'America First'
 	},
 	{
 		raw: [
@@ -113,7 +108,8 @@ const phrases = [
 	{
 		raw: [
 			"Chief Trumpster",
-			"Chief Trump"
+			"Chief Trump",
+			"Chief Chumster"
 		],
 		fmt: "Chief Trumpster"
 	}
@@ -161,7 +157,7 @@ export class SpaceDownloader {
 		Util.createMediaDir(this.subDir)
 		await this.spawnFFMPEG(live);
 		await this.spawnWhisper(live);
-		return await this.processCaptions();
+		return await this.processCaptions(live);
 	}
 
 	private spawnFFMPEG(live = false) {
@@ -203,12 +199,21 @@ export class SpaceDownloader {
 			? spawn(process.env.comspec, ['/c', cmd, ...args], spawnOptions)
 			: spawn(cmd, args, spawnOptions);
 
+		const filepath_audio = this.audioFile;
 		const logger = this.logger;
 		return new Promise((resolve, reject) => {
 			cp.on('close', function (code) {
-				const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
-				logger.info(`Audio downloaded after ${seconds}s`);
-				resolve(true);
+				const elapsed = Math.round((Date.now() - time) / 100) / 10;
+				
+				stat(filepath_audio)
+					.then((stats) => {
+						logger.info(`Audio downloaded after ${elapsed}s [${Math.round(stats.size/10000)/100}MB]`);
+						resolve(true);
+					})
+					.catch((error) => {
+						logger.error('Failed to get downloaded audio file size', error);
+						reject(error);
+					});
 			});
 			cp.on('error', function (error) {
 				reject(error);
@@ -242,8 +247,8 @@ export class SpaceDownloader {
 				: spawn(cmd, args, spawnOptions);
 
 			cp.on('close', function (code) {
-				const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
-				logger.info(`Audio transcribed after ${seconds}s`);
+				const elapsed = Math.round((Date.now() - time) / 100) / 10;
+				logger.info(`Audio transcribed after ${elapsed}s`);
 				resolve(true);
 			});
 			cp.on('error', function (error) {
@@ -252,29 +257,36 @@ export class SpaceDownloader {
 		});
 	};
 
-	private processCaptions(): Promise<CaptionPhrase[]> {
+	private processCaptions(live = false): Promise<CaptionPhrase[]> {
 		const time = Date.now();
-		const time_started = this.timeStarted;
-		const elapsed = (time_started > 0) ? (time - time_started) : 0;
-
+		const ms_space_elapsed = ((live) && (this.timeStarted > 0)) ? (time - this.timeStarted) : 0;
 		const caption_phrases = [];
 
 		const logger = this.logger;
 		return new Promise((resolve, reject) => {
 			let match = false;
+			let lines_processed = 0;
+			let ms_phrase_max = 0;
 			try {
 				createReadStream(this.subsFile)
 					.pipe(parse())
 					.on('data', function (node) {
 						if (node.type === 'cue') {
+							// remove non-text characters
 							let text = node.data.text.replace(/[.,#!\^;:{}=_`~()]/g, '');
+							// search captions and bold+underline detected phrases
 							phrases.forEach((phrase) => {
 								if (phrase.regexp.test(text)) {
-									text = text.replaceAll(phrase.regexp, '**' + phrase.format + '**');
+									text = text.replaceAll(phrase.regexp, '__**' + phrase.format + '**__');
 									match = true;
 								}
 							});
-							caption_phrases.push(new CaptionPhrase(node.data.start + elapsed, text));
+							caption_phrases.push(new CaptionPhrase(node.data.start + ms_space_elapsed, text));
+							// get the last phrase end time
+							if (node.data.end > ms_phrase_max) {
+								ms_phrase_max = node.data.end;
+							}
+							lines_processed++;
 						}
 					})
 					.on('error', function(error) {
@@ -282,8 +294,8 @@ export class SpaceDownloader {
 						resolve([]);
 					})
 					.on('finish', function () {
-						const seconds = Math.round(((Date.now() - time) / 1000) * 10) / 10;
-						logger.debug(`Captions scanned in ${seconds}s`);
+						const elapsed = Math.round((Date.now() - time) / 100) / 10;
+						logger.debug(`Captions scanned in ${elapsed}s [${lines_processed} lines/${Math.round(ms_phrase_max/100)/10}s}]`);
 						if (match === true) {
 							resolve(caption_phrases);
 						} else {
