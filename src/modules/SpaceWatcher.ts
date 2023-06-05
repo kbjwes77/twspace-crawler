@@ -135,7 +135,6 @@ export class SpaceWatcher extends EventEmitter {
                 .then(() => this.logger.debug('getSpaceMetadata: refresh guest token success'))
                 .catch(() => this.logger.error('getSpaceMetadata: refresh guest token failed'));
             }
-
             throw error;
         }
     };
@@ -308,28 +307,31 @@ export class SpaceWatcher extends EventEmitter {
     private downloadAudio(live=false) {
         const watcher = this;
         const metadata = {
-            title: this.spaceTitle,
-            author: this.userDisplayName,
-            artist: this.userDisplayName,
-            episode_id: this.spaceId
+            title: watcher.spaceTitle,
+            author: watcher.userDisplayName,
+            artist: watcher.userDisplayName,
+            episode_id: watcher.spaceId
         };
-        //this.logger.info(`File name: ${this.filename}`)
-        //this.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
+        //watcher.logger.info(`File name: ${watcher.filename}`)
+        //watcher.logger.info(`File metadata: ${JSON.stringify(metadata)}`)
 
-        if ((!this.downloader) || (!live)) {
-            this.downloader = new SpaceDownloader(
-                this.dynamicPlaylistUrl,
-                this.filename + ((live) ? '-live' : ''),
-                this.userScreenName,
-                this.metadata.started_at || this.metadata.created_at,
+        if ((!watcher.downloader) || (!live)) {
+            watcher.downloader = new SpaceDownloader(
+                watcher.dynamicPlaylistUrl,
+                watcher.filename + ((live) ? '-live' : ''),
+                watcher.userScreenName,
+                watcher.metadata.started_at || watcher.metadata.created_at,
                 metadata
             );
             // attempt to download audio
             watcher.downloader.download(live)
                 .then((success) => {
                     if (success) {
+                        if (!watcher.downloader) return;
+                        watcher.logger.debug('Downloaded audio successfully, found ' + watcher.downloader.system.phrases.length + ' phrases');
                         if (watcher.downloader.system.phrases.length >= 1) {
-                            this.logger.debug('Sending webhooks for detected phrases');
+                            watcher.detected_phrases = watcher.downloader.system.phrases;
+                            watcher.logger.debug('Sending webhooks for detected phrases');
                             watcher.sendWebhooks(true);
                         }
                     }

@@ -320,7 +320,7 @@ export class SpaceDownloader {
 		const ms_space_elapsed = ((live) && (downloader.timeStarted > 0)) ? (time - downloader.timeStarted) : 0;
 
 		return new Promise((resolve, reject) => {
-			const phrases = [];
+			const phrases: CaptionPhrase[] = [];
 			let phrases_matched = 0;
 			let phrases_scanned = 0;
 			let ms_phrase_last = 0;
@@ -350,7 +350,7 @@ export class SpaceDownloader {
 					})
 					.on('finish', function () {
 						downloader.system.captions.status = 'complete';
-						if (phrases_matched > 0) {
+						if (phrases_matched >= 1) {
 							downloader.system.phrases = phrases;
 						}
 						const elapsed = Math.round((Date.now() - time) / 100) / 10;

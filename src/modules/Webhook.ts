@@ -46,7 +46,7 @@ export class Webhook {
   ) {
     this.audiospace = audioSpace;
     this.directory = Util.getMediaDir(subDir);
-    this.audioFile = path.join(this.directory, `${filename}.mp3`);
+    this.audioFile = path.join(this.directory, `${filename}.ogg`);
     const username = SpaceUtil.getHostUsername(audioSpace);
     const spaceId = SpaceUtil.getId(audioSpace);
     this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` });
