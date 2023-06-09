@@ -1,12 +1,10 @@
-import { codeBlock, inlineCode, time } from '@discordjs/builders'
+import { time } from '@discordjs/builders'
 import axios, { AxiosRequestConfig } from 'axios'
-import { randomUUID } from 'crypto'
 import winston from 'winston'
 import fs from 'fs';
 import path from 'path';
 import { AudioSpaceMetadataState } from '../enums/Twitter.enum'
 import { AudioSpace } from '../interfaces/Twitter.interface'
-import { discordWebhookLimiter } from '../Limiter'
 import { logger as baseLogger } from '../logger'
 import { Util } from '../utils/Util'
 import { SpaceUtil } from '../utils/SpaceUtil'
@@ -38,123 +36,132 @@ export class Webhook {
   private directory: string
   private audioFile: string
 
-  constructor(
-    private readonly audioSpace: AudioSpace,
-    private readonly masterUrl: string,
-    private readonly filename: string,
-    private readonly subDir: string
-  ) {
-    this.audiospace = audioSpace;
-    this.directory = Util.getMediaDir(subDir);
-    this.audioFile = path.join(this.directory, `${filename}.ogg`);
-    const username = SpaceUtil.getHostUsername(audioSpace);
-    const spaceId = SpaceUtil.getId(audioSpace);
-    this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` });
-  }
+	constructor(
+		private readonly audioSpace: AudioSpace,
+		private readonly masterUrl: string,
+		private readonly filename: string,
+		private readonly subDir: string
+	) {
+		this.audiospace = audioSpace;
+		this.directory = Util.getMediaDir(subDir);
+		this.audioFile = path.join(this.directory, `${filename}.ogg`);
+		const username = SpaceUtil.getHostUsername(audioSpace);
+		const spaceId = SpaceUtil.getId(audioSpace);
+		this.logger = baseLogger.child({ label: `[Webhook] [${username}] [${spaceId}]` });
+	};
 
-  // eslint-disable-next-line class-methods-use-this
-  private get config() {
-    return configManager.config?.webhooks
-  }
+	// eslint-disable-next-line class-methods-use-this
+	private get config() {
+		return configManager.config?.webhooks
+	};
 
-  public send() {
-    this.sendDiscord()
-  }
+	public send() {
+		const space_info = this.getSpaceInfo();
+		return Promise.all([
+			this.send_discord(space_info),
+			this.send_cozy_captions(space_info)
+		]);
+	};
 
-  private async post(url: string, body: any) {
-    const requestId = randomUUID()
-    try {
-      this.logger.debug('--> post', {
-        requestId,
-        url: url.replace(/.{60}$/, '****')
-      })
-      const { data } = await axios.post(url, body)
-      this.logger.debug('<-- post', { requestId })
-      return data
-    } catch (error) {
-      this.logger.error(`post: ${error.message}`, { requestId })
-    }
-    return null
-  }
+	private async send_discord(space_info) {
+		this.logger.debug('Sending Discord Webhooks...');
 
-	private sendDiscord() {
-		this.logger.debug('sendDiscord');
 		const configs = Array.from(this.config?.discord || []);
-		configs.forEach((config) => {
-			if (!config.active) {
-				return;
-			}
+		for(let i=0; i<configs.length; i++) {
+			const config = configs[i];
+
+			// check if discord webhook is active
+			if (!config.active) continue;
+			// gather discord webhook urls
 			const urls = Array.from(config.urls || [])
-				.filter((v) => v)
+				.filter((v) => v);
+			// gather discord usernames to mention
 			const usernames = Array.from(config.usernames || [])
 				.filter((v) => v)
 				.map((v) => v.toLowerCase())
-			if (!urls.length || !usernames.length) {
-				return;
-			}
-			if (!usernames.find((v) => v === '<all>') && usernames.every((v) => !SpaceUtil.isParticipant(this.audioSpace, v))) {
-				return;
-			}
+			// don't send if no urls or usernames
+			if ((urls.length < 1) && (usernames.length < 1)) continue;
+			// unknown
+			// if (!usernames.find((v) => v === '<all>') && usernames.every((v) => !SpaceUtil.isParticipant(this.audioSpace, v))) continue;
 
-			const space_info = this.getSpaceInfo();
+			let content = '';
+			// mention discord users about live space
+			if (this.audioSpace.metadata.state === AudioSpaceMetadataState.RUNNING) {
+				Array.from(config.mentions?.roleIds || [])
+					.filter((v) => v)
+					.forEach((roleId) => {
+						content += `<@&${roleId}> `;
+					});
+				Array.from(config.mentions?.userIds || [])
+					.filter((v) => v)
+					.forEach((userId) => {
+						content += `<@${userId}> `;
+					});
+				content = [content, config.startMessage]
+					.filter((v) => v)
+					.map((v) => v.trim())
+					.join(' ');
+			}
+			// mention discord users about ended space
+			if (this.audioSpace.metadata.state === AudioSpaceMetadataState.ENDED) {
+				content = [content, config.endMessage]
+					.filter((v) => v)
+					.map((v) => v.trim())
+					.join(' ');
+			}
+			content = content.trim();
 
 			try {
-				// Build content with mentions
-				let content = '';
-				if (this.audioSpace.metadata.state === AudioSpaceMetadataState.RUNNING) {
-					Array.from(config.mentions?.roleIds || []).map((v) => v).forEach((roleId) => {
-						content += `<@&${roleId}> `;
-					})
-					Array.from(config.mentions?.userIds || []).map((v) => v).forEach((userId) => {
-						content += `<@${userId}> `;
-					})
-					content = [content, config.startMessage].filter((v) => v).map((v) => v.trim()).join(' ');
-				}
-				if (this.audioSpace.metadata.state === AudioSpaceMetadataState.ENDED) {
-					content = [content, config.endMessage].filter((v) => v).map((v) => v.trim()).join(' ');
-				}
-				content = content.trim();
-
 				// prepare discord webhook payload
 				const payload = {
 					content,
-					embeds: [this.getEmbed(space_info)],
+					embeds: [this.embed_create(space_info)],
 				};
 				// prepare discord webhook file payload
 				let payloadFile;
-				try {
-					const stats = fs.statSync(this.audioFile);
-					if (stats) {
-						payloadFile = this.getFilePayload();
-					}
-				} catch (error) {
-					this.logger.error('Audio file not found');
-				}
+				await fs.promises.stat(this.audioFile)
+					.then((stats) => {
+						if (stats) {
+							payloadFile = this.audio_payload();
+						}
+					})
+					.catch((error) => {
+						this.logger.error('Failed to locate audio file');
+					});
 				// send discord webhooks
-				urls.forEach((url) => discordWebhookLimiter.schedule(() => {
-					this.post(url, payload);
-					if (payloadFile) {
-						payloadFile.submit(url);
+				for(let j=0; j<urls.length; j++) {
+					if (payload) {
+						await axios.post(urls[j], payload);
 					}
-					return Promise.resolve(null);
-				}));
+					if (payloadFile) {
+						await payloadFile.submit(urls[j]);
+					}
+				}
 			} catch (error) {
-				this.logger.error(`sendDiscord: ${error.message}`);
+				this.logger.error(`Failed to send Discord webhooks: ${error.message}`);
+				return false;
 			}
+		}
+		return true;
+	};
 
-			// send cozy captions webhook
-			const body = {
-				'space': space_info
-			}
-			fetch('https://cozycaptions.com/twitter-crawler/create', { 'method': 'PUT', 'headers': { 'Content-Type': 'application/json' }, 'body': JSON.stringify(body) })
-				.then((response) => response.json())
-				.then((response) => {
-					if (response.error) throw Error(response.error);
-				})
-				.catch((error) => {
-					this.logger.error(`sendCozycaptions: ${error}`);
-				});
-		});
+	private send_cozy_captions(space_info) {
+		this.logger.debug('Sending Cozy Captions webhooks...');
+
+		// send cozy captions webhook
+		const body = {
+			'space': space_info
+		};
+		return fetch('https://cozycaptions.com/twitter-crawler/create', { 'method': 'PUT', 'headers': { 'Content-Type': 'application/json' }, 'body': JSON.stringify(body) })
+			.then((response) => response.json())
+			.then((response) => {
+				if (response.error) throw Error(response.error);
+				return true;
+			})
+			.catch((error) => {
+				this.logger.error(`Failed to send Cozy Captions webhook: ${error}`);
+				return false;
+			});
 	};
 
 	private getSpaceInfo() {
@@ -223,7 +230,7 @@ export class Webhook {
 		return info;
 	};
 
-	private getEmbed(space_info: any) {
+	private embed_create(space_info: any) {
 		// fields
 		const fields: any[] = [];
 
@@ -231,7 +238,7 @@ export class Webhook {
 		if ([AudioSpaceMetadataState.RUNNING].includes(this.audioSpace.metadata.state as any)) {
 			fields.push({
 				name: '▶️ Started at',
-				value: Webhook.getEmbedLocalTime(space_info.date_started.getTime()),
+				value: Webhook.embed_local_time(space_info.date_started.getTime()),
 				inline: true,
 			});
 
@@ -249,7 +256,7 @@ export class Webhook {
 			if (this.audioSpace.metadata.ended_at) {
 				fields.push({
 					name: '⏹️ Ended at',
-					value: Webhook.getEmbedLocalTime(Number(this.audioSpace.metadata.ended_at)),
+					value: Webhook.embed_local_time(Number(this.audioSpace.metadata.ended_at)),
 					inline: true,
 				});
 			}
@@ -302,17 +309,17 @@ export class Webhook {
 		};
 	};
 
-  public static getEmbedLocalTime(ms: number) {
-    if (!ms) {
-      return null
-    }
-    return [
-      time(Math.floor(ms / 1000)),
-      time(Math.floor(ms / 1000), 'R'),
-    ].join('\n')
-  }
+	public static embed_local_time(ms: number) {
+		if (!ms) {
+			return null;
+		}
+		return [
+			time(Math.floor(ms / 1000)),
+			time(Math.floor(ms / 1000), 'R'),
+		].join('\n');
+	}
 
-	public getFilePayload() {
+	private audio_payload() {
 		const form_data = new FormData();
 		form_data.append('username', SpaceUtil.getHostUsername(this.audioSpace));
 		form_data.append('avatar_url', SpaceUtil.getHostProfileImgUrl(this.audioSpace));

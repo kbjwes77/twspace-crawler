@@ -214,7 +214,7 @@ export class SpaceDownloader {
 		const args = [];
 		if (live) {
 			// limit to 30 seconds for live transcription
-			args.push('-t', '30');
+			args.push('-t', '120');
 		}
 		args.push(
 			'-y',

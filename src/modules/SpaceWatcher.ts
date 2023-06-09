@@ -275,7 +275,7 @@ export class SpaceWatcher extends EventEmitter {
         try {
             // Get latest metadata in case title changed
             await this.getSpaceMetadata();
-            //this.logSpaceInfo();
+            this.logSpaceInfo();
 
             if (this.metadata.state === AudioSpaceMetadataState.RUNNING) {
                 // Recheck dynamic playlist in case host disconnect for a long time
@@ -294,10 +294,10 @@ export class SpaceWatcher extends EventEmitter {
         try {
             // Get latest metadata in case title changed
             await this.getSpaceMetadata();
-            //this.logSpaceInfo();
+            this.logSpaceInfo();
 
             if (this.metadata.state === AudioSpaceMetadataState.RUNNING) {
-                this.downloadAudio(true);
+                await this.downloadAudio(true);
             }
         } catch (error) {
             this.logger.warn(`processLiveDownload: ${error.message}`);
@@ -324,19 +324,20 @@ export class SpaceWatcher extends EventEmitter {
                 metadata
             );
             // attempt to download audio
-            watcher.downloader.download(live)
+            return watcher.downloader.download(live)
                 .then((success) => {
                     if (success) {
-                        if (!watcher.downloader) return;
-                        watcher.logger.debug('Downloaded audio successfully, found ' + watcher.downloader.system.phrases.length + ' phrases');
-                        if (watcher.downloader.system.phrases.length >= 1) {
-                            watcher.detected_phrases = watcher.downloader.system.phrases;
-                            watcher.logger.debug('Sending webhooks for detected phrases');
-                            watcher.sendWebhooks(true);
+                        if (watcher.downloader) {
+                            watcher.logger.debug('Downloaded audio successfully, found ' + watcher.downloader.system.phrases.length + ' phrases');
+                            if (watcher.downloader.system.phrases.length >= 1) {
+                                watcher.detected_phrases = watcher.downloader.system.phrases;
+                                return watcher.sendWebhooks(true);
+                            }
                         }
                     }
                     watcher.downloader = undefined;
                     delete watcher.downloader;
+                    return [false, false];
                 });
         }
     };
@@ -363,6 +364,6 @@ export class SpaceWatcher extends EventEmitter {
             this.filename + ((live) ? '-live' : ''),
             this.userScreenName
         );
-        webhook.send();
+        return webhook.send();
     };
 };
